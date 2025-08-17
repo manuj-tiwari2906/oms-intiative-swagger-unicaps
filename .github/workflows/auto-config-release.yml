@@ -1,0 +1,238 @@
+name: Deploy Config - Release
+
+# Controls when the workflow will run.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: environment
+        description: Select the environment
+        required: true
+        default: BUILD
+      choice:
+        type: choice
+        description: Select type of Business
+        options:
+          - Retail
+          - B2B
+          - 3PL
+
+env:
+  CLIENT_ID: ${{ secrets.AUTH_CLIENT_ID }}
+  CLIENT_SECRET: ${{ secrets.AUTH_CLIENT_SECRET }}
+  TOKEN_URL: ${{ secrets.AUTH_TOKEN_URL }}
+  CLIENT_SCOPE: ${{ secrets.AUTH_CLIENT_SCOPE }}
+  DEPLOY_ENV_NAME: ${{ vars.ENV_NAME }}
+
+jobs:
+  fetch_auth_token:
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    outputs:
+      api-token: ${{ steps.token-step.outputs.token_encrypted }}
+    steps:
+      - name: Get the access token
+        run: |
+          token=$(curl --location --request POST '${{ env.TOKEN_URL }}' \
+          --header 'Content-Type: application/x-www-form-urlencoded' \
+          --data-urlencode 'grant_type=client_credentials' \
+          --data-urlencode 'client_id=${{ env.CLIENT_ID }}' \
+          --data-urlencode 'client_secret=${{ env.CLIENT_SECRET }}' \
+          --data-urlencode 'scope=${{ env.CLIENT_SCOPE }}'| jq -r '.access_token')                      
+          token_encrypted=$(gpg --symmetric --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "$token") | base64 -w0)
+          echo "::set-output name=token_encrypted::$token_encrypted"
+        id: token-step
+        shell: bash
+
+  invoke-task-apis:
+    needs: fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN:  $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/Tasks"
+          isPutNeeded: false
+
+  invoke-Workflow-apis:
+    needs:
+      - fetch_auth_token
+      - invoke-task-apis
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN:  $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/WorkflowDefinitions"
+          isPutNeeded: false
+
+#  invoke-AlertRules-apis:
+#    needs:
+#      - fetch_auth_token
+#    runs-on: saas-runners
+#    environment: ${{ github.event.inputs.environment }}
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v2
+#      - name: Run the template
+#        uses: ./.github/actions/template
+#        with:
+#          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+#          API_ACCESS_TOKEN:  $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+#          FOLDER_PATH: "${{ inputs.choice }}/AlertRules"
+#          isPutNeeded: true
+
+  invoke-General_Rules-apis:
+    needs:
+      - fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/GeneralRules"
+          isPutNeeded: true
+
+
+#  invoke-custom-schema-apis:
+#    needs:
+#      - fetch_auth_token
+#    runs-on: saas-runners
+#    environment: ${{ github.event.inputs.environment }}
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v2
+#      - name: Run the template
+#        uses: ./.github/actions/template
+#        with:
+#          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+#          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+#          FOLDER_PATH: "${{ inputs.choice }}/CustomSchema"
+#          isPutNeeded: true
+
+  invoke-ModificationRules-apis:
+    needs:
+      - fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/ModificationRules"
+          isPutNeeded: true
+
+  invoke-PaymentRules-apis:
+    needs:
+      - fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/PaymentRules"
+          isPutNeeded: true
+
+  invoke-PaymentPriorityRules-apis:
+    needs:
+      - fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/PaymentPriorityRules"
+          isPutNeeded: true
+          
+
+  invoke-StateTransitionRules-apis:
+    needs:
+      - fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/StateTransitionRules"
+          isPutNeeded: true
+#
+#  invoke-Tenant_Config-apis:
+#    needs:
+#      - fetch_auth_token
+#    runs-on: saas-runners
+#    environment: ${{ github.event.inputs.environment }}
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v2
+#      - name: Run the template
+#        uses: ./.github/actions/template
+#        with:
+#          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+#          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+#          FOLDER_PATH: "${{ inputs.choice }}/TenantConfigs"
+#          isPutNeeded: false
+
+  invoke-ValidationRules-apis:
+    needs:
+      - fetch_auth_token
+    runs-on: saas-runners
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Run the template
+        uses: ./.github/actions/template
+        with:
+          DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+          API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+          FOLDER_PATH: "${{ inputs.choice }}/ValidationRules"
+          isPutNeeded: true
+
+  # invoke-WorkflowdeterminationRules-apis:
+  #   needs:
+  #     - fetch_auth_token
+  #   runs-on: saas-runners
+  #   environment: ${{ github.event.inputs.environment }}
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v2
+  #     - name: Run the template
+  #       uses: ./.github/actions/template
+  #       with:
+  #         DOMAIN_NAME: "${{ env.DOMAIN_NAME }}"
+  #         API_ACCESS_TOKEN: $(gpg --decrypt --quiet --batch --passphrase "${{ env.CLIENT_SECRET }}" --output - <(echo "${{ needs.fetch_auth_token.outputs.api-token }}" | base64 --decode))
+  #         FOLDER_PATH: "${{ inputs.choice }}/WorkflowdeterminationRules"

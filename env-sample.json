@@ -1,0 +1,15 @@
+{
+    "name": "Local Environment",
+    "values": [
+      {
+        "key": "base_url",
+        "value": "https://api.unicaps.io",
+        "enabled": true
+      },
+      {
+        "key": "token",
+        "value": "76v86786v76vi7v6i77iv7iv7iv67iv6juj6v7c6c5h6vr6hr6rr6ru65u6ru6fr67b",
+        "enabled": true
+      }
+    ]
+  } 

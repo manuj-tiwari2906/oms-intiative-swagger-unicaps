@@ -1,0 +1,113 @@
+name: Invoke Requested API Workflow
+
+inputs:
+  FOLDER_PATH:
+    required: true
+  API_ACCESS_TOKEN:
+    required: true
+  DOMAIN_NAME:
+    required: true
+  isPutNeeded:
+    description: 'Specify whether to use PUT if POST fails'
+    required: false
+    default: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up environment
+      run: |
+        mkdir payloads
+        cp ${{ inputs.FOLDER_PATH }}/*.json payloads/
+      shell: bash
+
+    - name: Merge Env files
+      run: |
+        echo "Printing the ENV value: ${{ env.DEPLOY_ENV_NAME }}"
+        if [ -f ${{ inputs.FOLDER_PATH }}/../${{ env.DEPLOY_ENV_NAME }}.variable_env ]; then
+          cat ${{ inputs.FOLDER_PATH }}/../${{ env.DEPLOY_ENV_NAME }}.variable_env > ${{ inputs.FOLDER_PATH }}/../parent_var_file
+        else
+          cat ${{ inputs.FOLDER_PATH }}/../variable_env > ${{ inputs.FOLDER_PATH }}/../parent_var_file
+        fi
+        
+        if [ -f ${{ inputs.FOLDER_PATH }}/${{ env.DEPLOY_ENV_NAME }}.variable_env ]; then
+          cat ${{ inputs.FOLDER_PATH }}/${{ env.DEPLOY_ENV_NAME }}.variable_env > ${{ inputs.FOLDER_PATH }}/child_var_file
+        else
+          cat ${{ inputs.FOLDER_PATH }}/variable_env > ${{ inputs.FOLDER_PATH }}/child_var_file
+        fi
+        
+        awk '!x[$1]++' ${{ inputs.FOLDER_PATH }}/../parent_var_file ${{ inputs.FOLDER_PATH }}/child_var_file > ${{ inputs.FOLDER_PATH }}/new_variable_env
+
+      #         awk '!x[$1]++' ${{ inputs.FOLDER_PATH }}/../variable_env ${{ inputs.FOLDER_PATH }}/variable_env > ${{ inputs.FOLDER_PATH }}/new_variable_env
+      shell: bash
+
+    - name: Read variables from child file
+      run: |
+        declare -A vars
+        while IFS= read -r line; do
+          key="${line%=*}"
+          value="${line#*=}"
+          vars["$key"]="$value"
+        done < ${{ inputs.FOLDER_PATH }}/new_variable_env
+        for key in "${!vars[@]}"; do
+          echo "Exporting $key=${vars[$key]}"
+          echo "$key=${vars[$key]}"  >> $GITHUB_ENV
+        done
+      shell: bash
+
+    - name: Invoke APIs
+      run: |
+        for filename in payloads/*.json; do          
+          sed -E 's/\{\{|\}\}/\\\\&/g' $filename 
+          awk -F= 'NR==FNR{a[$1]=$2;next}{for(i in a) gsub("{{"i"}}", a[i]) }1' ${{ inputs.FOLDER_PATH }}/new_variable_env $filename > output.json
+          mv output.json $filename
+          echo "Invoking API with $filename"
+          cat "$filename"
+          echo "${{ env.DOMAIN_NAME }}${{ env.API_Name }}"
+        
+          response=$(curl -X POST ${{ env.DOMAIN_NAME }}${{ env.API_Name }} \
+          -H "Authorization: Bearer ${{ inputs.API_ACCESS_TOKEN }}" \
+          -H "Content-Type: application/json" \
+          -d @$filename \
+          -w '%{http_code}' -o response.txt)        
+          response_body=$(cat response.txt | sed '$d')          
+          #if [[ "$response" -ge 400 ]]; then
+          if [[ "$response" =~ ^[45] ]]; then
+            echo "POST request failed with status code $response, response body: $response_body"
+            if [[ "$response" == 401 ]]; then
+              exit 1
+            fi  
+            if [[ "${{ inputs.isPutNeeded }}" == true ]]; then
+              echo "Trying PUT request"
+              response=$(curl -X PUT ${{ env.DOMAIN_NAME }}${{ env.API_Name }} \
+              -H "Authorization: Bearer ${{ inputs.API_ACCESS_TOKEN }}" \
+              -H "Content-Type: application/json" \
+              -d @$filename \
+              -w '%{http_code}' -o response.txt)
+              response_body=$(cat response.txt | sed '$d')
+              #if [[ "$response" -ge 400 ]]; then
+              if [[ "$response" =~ ^[45] ]]; then
+                echo "PUT request failed with status code $response, response body: $response_body"
+                exit 1
+              else
+                echo "PUT request successful with status code $response, response body: $response_body"
+              fi
+            elif [[ ${{ env.API_Name }} == "/commerce/orchestration/v1/orchestration/meta/workflow" ]]; then
+              if [[ $response_body == *"already exists!"* ]]; then
+                echo "Workflow Already Exists"
+              else
+                exit 1
+              fi 
+            fi
+          else
+            echo "POST request successful with status code $response, response body: $response_body"
+          fi
+        done
+      shell: bash
+      env:
+        API_Name: ${{ env.API_Name }}
+        DOMAIN_NAME: ${{ env.DOMAIN_NAME }}
+
